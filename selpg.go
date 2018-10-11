@@ -1,6 +1,6 @@
 package main
 
-import {
+import (
 	"bufio" // 用于从标准输入流获取数据和将数据写入到标准输入流
 	"fmt"	// 用于引用io.EOF 来判断错误是否是文件尾导致
 	"io"	// 用于将错误信息写入到标准错误流
@@ -10,7 +10,7 @@ import {
 	"strings"	// 用于划分、拼接字符串
 
 	flag "github.com/spf13/pflag"	// 用于获取程序运行时用户输入的参数和标识
-}
+)
 
 func main() {
 	//初始化返回的都是对应类型的指针，绑定相应的变量以及赋相应的初始值
