@@ -1,23 +1,22 @@
 package main
 
 import (
-	"bufio" // 用于从标准输入流获取数据和将数据写入到标准输入流 //
-	"fmt"	// 用于引用io.EOF 来判断错误是否是文件尾导致 //
-	"io"	// 用于将错误信息写入到标准错误流 //
-	"log"	// 用于打开文件和异常退出时发送状态码 //
-	"os"	// 用于打开文件和异常退出时发送状态码 //
-	"os/exec"	// 用于开启lp子进程 //
-	"strings"	// 用于划分、拼接字符串 //
+	"bufio"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"strings"
 
-	flag "github.com/spf13/pflag"	// 用于获取程序运行时用户输入的参数和标识 //
+	flag "github.com/spf13/pflag"
 )
 
 func main() {
-	//初始化返回的都是对应类型的指针，绑定相应的变量以及赋相应的初始值
-	//定义待解析的命令行参数
+	// Initializing //
 	startNumber := flag.IntP("startpage", "s", 0, "The page to start printing at [Necessary, no greater than endpage]")
 	endNumber := flag.IntP("endpage", "e", 0, "The page to end printing at [Necessary, no less than startpage]")
-	lineNumber := flag.IntP("linenumber", "1", 72, "If this flag is used, a page will consist of a fixed number of characters, which is given by you")
+	lineNumber := flag.IntP("linenumber", "l", 72, "If this flag is used, a page will consist of a fixed number of characters, which is given by you")
 	forcePage := flag.BoolP("forcepaging", "f", false, "Change page only if '-f' appears [Cannot be used with -l]")
 	destinationPrinter := flag.StringP("destination", "d", "", "Choose a printer to accept the result as a task")
 
@@ -25,21 +24,21 @@ func main() {
 	l := log.New(os.Stderr, "", 0)
 
 	// Data holder //
-	bytes := make([]byte,65535)
+	bytes := make([]byte, 65535)
 	var data string
 	var resultData string
 
-	flag.Parse() // 所有flag定义完成后用Parse来解析
+	flag.Parse()
 
 	// Are necessary flags given? //
 	if *startNumber == 0 || *endNumber == 0 {
-		l.Println("Necessary falgs are not given!")
-		flag.Usage() // 用于输出所有定义了的命令行参数和帮助信息. 一般，当命令行参数解析出错时，该函数会被调用。
+		l.Println("Necessary flags are not given!")
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	// Are flags value valid //
-	if(*startNumber > *endNumber) || *startNumber < 0 || *endNumber < 0 || *lineNumber <= 0 {
+	// Are flags value valid? //
+	if (*startNumber > *endNumber) || *startNumber < 0 || *endNumber < 0 || *lineNumber <= 0 {
 		l.Println("Invalid flag values!")
 		flag.Usage()
 		os.Exit(1)
@@ -60,7 +59,7 @@ func main() {
 	}
 
 	// StdIn or File? //
-	if flag.NArg() == 0 { // 参数中没有能够按照预定义的参数解析的部分，通过flag.Args()即可获取，是一个字符串切片
+	if flag.NArg() == 0 {
 		// StdIn condition //
 		reader := bufio.NewReader(os.Stdin)
 
@@ -85,7 +84,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		// 读取整个文件
+		// Read the whole file
 		size, err := file.Read(bytes)
 
 		for size != 0 && err == nil {
@@ -100,7 +99,9 @@ func main() {
 		}
 	}
 
-	if *forcePage {  // 这里是看换页符的
+	// LineNumber or ForcePaging? //
+	if *forcePage {
+		// ForcePaging //
 		pagedData := strings.SplitAfter(data, "\f")
 
 		if len(pagedData) < *endNumber {
@@ -110,8 +111,8 @@ func main() {
 		}
 
 		resultData = strings.Join(pagedData[*startNumber-1:*endNumber], "")
-	}
-	 else {	// 这里是看换行符的
+	} else {
+		// LineNumber //
 		lines := strings.SplitAfter(data, "\n")
 		if len(lines) < (*endNumber-1)*(*lineNumber)+1 {
 			l.Println("Invalid flag values! Too large endNumber!")
@@ -125,7 +126,7 @@ func main() {
 		}
 	}
 
-	writer := bufio.NewWriter(os.Stdout) // 创建一个Writer
+	writer := bufio.NewWriter(os.Stdout)
 
 	// StdOut or Printer? //
 	if *destinationPrinter == "" {
@@ -134,14 +135,14 @@ func main() {
 	} else {
 		// Printer //
 		cmd := exec.Command("lp", "-d"+*destinationPrinter)
-		lpStdin, err := cmd.StdinPipe() // 连接到命令启动时标准输入的管道
+		lpStdin, err := cmd.StdinPipe()
 
 		if err != nil {
 			l.Println("Error occured when trying to send data to lp:\n", err.Error())
 			os.Exit(1)
 		}
 		go func() {
-			defer lpStdin.Close() // 在return之前关闭管道并输出相关内容
+			defer lpStdin.Close()
 			io.WriteString(lpStdin, resultData)
 		}()
 
