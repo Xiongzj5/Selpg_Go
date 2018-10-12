@@ -1,162 +1,176 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"io"
-	"log"
-	"os"
-	"os/exec"
-	"strings"
-
-	flag "github.com/spf13/pflag"
+    "bufio"
+    "flag"
+    "fmt"
+    "io"
+    "os"
+    "os/exec"
 )
 
+type selpgargs struct {
+    start_page  int
+    end_page    int
+    input_file  string
+    destination string
+    page_len    int
+    form_deli   bool
+}
+
+var progname string
+
+//show the usage of the command selpg
+func usage() {
+    fmt.Printf("Usage of %s:\n\n", progname)
+    fmt.Printf("%s is a tool to select pages from what you want.\n\n", progname)
+    fmt.Printf("Usage:\n\n")
+    fmt.Printf("\tselpg -s=Number -e=Number [options] [filename]\n\n")
+    fmt.Printf("The arguments are:\n\n")
+    fmt.Printf("\t-s=Number\tStart from Page <number>.\n")
+    fmt.Printf("\t-e=Number\tEnd to Page <number>.\n")
+    fmt.Printf("\t-l=Number\t[options]Specify the number of line per page.Default is 72.\n")
+    fmt.Printf("\t-f\t\t[options]Specify that the pages are sperated by \\f.\n")
+    fmt.Printf("\t[filename]\t[options]Read input from the file.\n\n")
+    fmt.Printf("If no file specified, %s will read input from stdin. Control-D to end.\n\n", progname)
+}
+
+//initial flags
+func FlagInit(args *selpgargs) {
+    flag.Usage = usage
+    flag.IntVar(&args.start_page, "s", -1, "Start page.")
+    flag.IntVar(&args.end_page, "e", -1, "End page.")
+    flag.IntVar(&args.page_len, "l", 72, "Line number per page.")
+    flag.BoolVar(&args.form_deli, "f", false, "Determine form-feed-delimited")
+    flag.StringVar(&args.destination, "d", "", "specify the printer")
+    flag.Parse()
+}
+
+func ProcessArgs(args *selpgargs) {
+    if args.start_page == -1 || args.end_page == -1 {
+        fmt.Fprintf(os.Stderr, "%s: not enough arguments\n\n", progname)
+        flag.Usage()
+        os.Exit(1)
+    }
+
+    if os.Args[1][0] != '-' || os.Args[1][1] != 's' {
+        fmt.Fprintf(os.Stderr, "%s: 1st arg should be -sstart_page\n\n", progname)
+        flag.Usage()
+        os.Exit(1)
+    }
+
+    end_index := 2
+    if len(os.Args[1]) == 2 {
+        end_index = 3
+    }
+
+    if os.Args[end_index][0] != '-' || os.Args[end_index][1] != 'e' {
+        fmt.Fprintf(os.Stderr, "%s: 2st arg should be -eend_page\n\n", progname)
+        flag.Usage()
+        os.Exit(1)
+    }
+
+    if args.start_page > args.end_page || args.start_page < 0 ||
+        args.end_page < 0 {
+        fmt.Fprintln(os.Stderr, "Invalid arguments")
+        flag.Usage()
+        os.Exit(1)
+    }
+}
+
+func ProcessInput(args *selpgargs) {
+    var stdin io.WriteCloser
+    var err error
+    var cmd *exec.Cmd
+
+    if args.destination != "" {
+        cmd = exec.Command("cat", "-n")
+        stdin, err = cmd.StdinPipe()
+        if err != nil {
+            fmt.Println(err)
+        }
+    } else {
+        stdin = nil
+    }
+
+    if flag.NArg() > 0 {
+        args.input_file = flag.Arg(0)
+        output, err := os.Open(args.input_file)
+        if err != nil {
+            fmt.Println(err)
+            os.Exit(1)
+        }
+        reader := bufio.NewReader(output)
+        if args.form_deli {
+            for pageNum := 0; pageNum <= args.end_page; pageNum++ {
+                line, err := reader.ReadString('\f')
+                if err != io.EOF && err != nil {
+                    fmt.Println(err)
+                    os.Exit(1)
+                }
+                if err == io.EOF {
+                    break
+                }
+                printOrWrite(args, string(line), stdin)
+            }
+        } else {
+            count := 0
+            for {
+                line, _, err := reader.ReadLine()
+                if err != io.EOF && err != nil {
+                    fmt.Println(err)
+                    os.Exit(1)
+                }
+                if err == io.EOF {
+                    break
+                }
+                if count/args.page_len >= args.start_page {
+                    if count/args.page_len > args.end_page {
+                        break
+                    } else {
+                        printOrWrite(args, string(line), stdin)
+                    }
+                }
+                count++
+            }
+
+        }
+    } else {
+        scanner := bufio.NewScanner(os.Stdin)
+        count := 0
+        target := ""
+        for scanner.Scan() {
+            line := scanner.Text()
+            line += "\n"
+            if count/args.page_len >= args.start_page {
+                if count/args.page_len <= args.end_page {
+                    target += line
+                }
+            }
+            count++
+        }
+        printOrWrite(args, string(target), stdin)
+    }
+
+    if args.destination != "" {
+        stdin.Close()
+        cmd.Stdout = os.Stdout
+        cmd.Run()
+    }
+}
+
+func printOrWrite(args *selpgargs, line string, stdin io.WriteCloser) {
+    if args.destination != "" {
+        stdin.Write([]byte(line + "\n"))
+    } else {
+        fmt.Println(line)
+    }
+}
+
 func main() {
-	// Initializing //
-	startNumber := flag.IntP("startpage", "s", 0, "The page to start printing at [Necessary, no greater than endpage]")
-	endNumber := flag.IntP("endpage", "e", 0, "The page to end printing at [Necessary, no less than startpage]")
-	lineNumber := flag.IntP("linenumber", "l", 72, "If this flag is used, a page will consist of a fixed number of characters, which is given by you")
-	forcePage := flag.BoolP("forcepaging", "f", false, "Change page only if '-f' appears [Cannot be used with -l]")
-	destinationPrinter := flag.StringP("destination", "d", "", "Choose a printer to accept the result as a task")
-
-	// StdErr printer //
-	l := log.New(os.Stderr, "", 0)
-
-	// Data holder //
-	bytes := make([]byte, 65535)
-	var data string
-	var resultData string
-
-	flag.Parse()
-
-	// Are necessary flags given? //
-	if *startNumber == 0 || *endNumber == 0 {
-		l.Println("Necessary flags are not given!")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// Are flags value valid? //
-	if (*startNumber > *endNumber) || *startNumber < 0 || *endNumber < 0 || *lineNumber <= 0 {
-		l.Println("Invalid flag values!")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// Are lineNumber and forcePage set at the same time? //
-	if *lineNumber != 72 && *forcePage {
-		l.Println("Linenumber and forcepaging cannot be set at the same time!")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// Too many arguments? //
-	if flag.NArg() > 1 {
-		l.Println("Too many arguments!")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// StdIn or File? //
-	if flag.NArg() == 0 {
-		// StdIn condition //
-		reader := bufio.NewReader(os.Stdin)
-
-		size, err := reader.Read(bytes)
-
-		for size != 0 && err == nil {
-			data = data + string(bytes)
-			size, err = reader.Read(bytes)
-		}
-
-		// Error
-		if err != io.EOF {
-			l.Println("Error occured when reading from StdIn:\n", err.Error())
-			os.Exit(1)
-		}
-
-	} else {
-		// File condition //
-		file, err := os.Open(flag.Args()[0]) // TODO TEST: is PATH needed?
-		if err != nil {
-			l.Println("Error occured when opening file:\n", err.Error())
-			os.Exit(1)
-		}
-
-		// Read the whole file
-		size, err := file.Read(bytes)
-
-		for size != 0 && err == nil {
-			data = data + string(bytes)
-			size, err = file.Read(bytes)
-		}
-
-		// Error
-		if err != io.EOF {
-			l.Println("Error occured when reading file:\n", err.Error())
-			os.Exit(1)
-		}
-	}
-
-	// LineNumber or ForcePaging? //
-	if *forcePage {
-		// ForcePaging //
-		pagedData := strings.SplitAfter(data, "\f")
-
-		if len(pagedData) < *endNumber {
-			l.Println("Invalid flag values! Too large endNumber!")
-			flag.Usage()
-			os.Exit(1)
-		}
-
-		resultData = strings.Join(pagedData[*startNumber-1:*endNumber], "")
-	} else {
-		// LineNumber //
-		lines := strings.SplitAfter(data, "\n")
-		if len(lines) < (*endNumber-1)*(*lineNumber)+1 {
-			l.Println("Invalid flag values! Too large endNumber!")
-			flag.Usage()
-			os.Exit(1)
-		}
-		if len(lines) < *endNumber*(*lineNumber) {
-			resultData = strings.Join(lines[(*startNumber)*(*lineNumber)-(*lineNumber):], "")
-		} else {
-			resultData = strings.Join(lines[(*startNumber)*(*lineNumber)-(*lineNumber):(*endNumber)*(*lineNumber)], "")
-		}
-	}
-
-	writer := bufio.NewWriter(os.Stdout)
-
-	// StdOut or Printer? //
-	if *destinationPrinter == "" {
-		// StdOut //
-		fmt.Printf("%s", resultData)
-	} else {
-		// Printer //
-		cmd := exec.Command("lp", "-d"+*destinationPrinter)
-		lpStdin, err := cmd.StdinPipe()
-
-		if err != nil {
-			l.Println("Error occured when trying to send data to lp:\n", err.Error())
-			os.Exit(1)
-		}
-		go func() {
-			defer lpStdin.Close()
-			io.WriteString(lpStdin, resultData)
-		}()
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			l.Println("Error occured when sending data to lp:\n", err.Error())
-			os.Exit(1)
-		}
-
-		_, err = writer.Write(out)
-
-		if err != nil {
-			l.Println("Error occured when writing information to StdOut:\n", err.Error())
-			os.Exit(1)
-		}
-	}
+    progname = os.Args[0]
+    var args selpgargs
+    FlagInit(&args)
+    ProcessArgs(&args)
+    ProcessInput(&args)
 }
